@@ -829,13 +829,11 @@ window.qBittorrent.DynamicTable ??= (() => {
                 filteredRows[row.rowId] = row;
             }
 
+            const column = this.columns[this.sortedColumn];
+            const isReverseSort = (this.reverseSort === "0");
             filteredRows.sort((row1, row2) => {
-                const column = this.columns[this.sortedColumn];
-                const res = column.compareRows(row1, row2);
-                if (this.reverseSort === "0")
-                    return res;
-                else
-                    return -res;
+                const result = column.compareRows(row1, row2);
+                return isReverseSort ? result : -result;
             });
             return filteredRows;
         }
@@ -860,40 +858,47 @@ window.qBittorrent.DynamicTable ??= (() => {
             }
             else {
                 const trs = [...this.getTrs()];
+                const trMap = new Map(trs.map(tr => [tr.rowId, tr]));
 
                 for (let rowPos = 0; rowPos < rows.length; ++rowPos) {
                     const rowId = rows[rowPos].rowId;
-                    let tr_found = false;
-                    for (let j = rowPos; j < trs.length; ++j) {
-                        if (trs[j].rowId === rowId) {
-                            tr_found = true;
-                            if (rowPos === j)
-                                break;
-                            trs[j].inject(trs[rowPos], "before");
-                            const tmpTr = trs[j];
-                            trs.splice(j, 1);
-                            trs.splice(rowPos, 0, tmpTr);
-                            break;
-                        }
+                    const existingTr = trMap.get(rowId);
+                    if (existingTr !== undefined) {
+                        this.updateRow(existingTr, fullUpdate);
                     }
-                    if (tr_found) { // row already exists in the table
-                        this.updateRow(trs[rowPos], fullUpdate);
-                    }
-                    else { // else create a new row in the table
+                    else {
                         const tr = this.createRowElement(rows[rowPos]);
 
-                        // Insert
-                        if (rowPos >= trs.length) {
-                            tr.inject(this.tableBody);
-                            trs.push(tr);
-                        }
-                        else {
-                            tr.inject(trs[rowPos], "before");
-                            trs.splice(rowPos, 0, tr);
-                        }
+                        // TODO look into using DocumentFragment or appending all trs at once for add'l performance gains
+                        // add to end of table - we'll move into the proper order later
+                        this.tableBody.appendChild(tr);
+                        trMap.set(rowId, tr);
 
                         this.updateRow(tr, true);
                     }
+                }
+
+                // reorder table rows
+                let prevTr = null;
+                for (let rowPos = 0; rowPos < rows.length; ++rowPos) {
+                    const { rowId } = rows[rowPos];
+                    const tr = trMap.get(rowId);
+
+                    const isInCorrectLocation = rowId === trs[rowPos]?.rowId;
+                    if (!isInCorrectLocation) {
+                        // move row into correct location
+                        if (prevTr === null) {
+                            // insert as first row in table
+                            if (trs.length === 0)
+                                this.tableBody.append(tr);
+                            else
+                                trs[0].before(tr);
+                        }
+                        else {
+                            prevTr.after(tr);
+                        }
+                    }
+                    prevTr = tr;
                 }
 
                 const rowPos = rows.length;
@@ -1777,13 +1782,11 @@ window.qBittorrent.DynamicTable ??= (() => {
                 }
             }
 
+            const column = this.columns[this.sortedColumn];
+            const isReverseSort = (this.reverseSort === "0");
             filteredRows.sort((row1, row2) => {
-                const column = this.columns[this.sortedColumn];
-                const res = column.compareRows(row1, row2);
-                if (this.reverseSort === "0")
-                    return res;
-                else
-                    return -res;
+                const result = column.compareRows(row1, row2);
+                return isReverseSort ? result : -result;
             });
             return filteredRows;
         }
@@ -2037,13 +2040,11 @@ window.qBittorrent.DynamicTable ??= (() => {
                 filteredRows = [...this.getRowValues()];
             }
 
+            const column = this.columns[this.sortedColumn];
+            const isReverseSort = (this.reverseSort === "0");
             filteredRows.sort((row1, row2) => {
-                const column = this.columns[this.sortedColumn];
-                const res = column.compareRows(row1, row2);
-                if (this.reverseSort === "0")
-                    return res;
-                else
-                    return -res;
+                const result = column.compareRows(row1, row2);
+                return isReverseSort ? result : -result;
             });
 
             return filteredRows;
@@ -2454,26 +2455,31 @@ window.qBittorrent.DynamicTable ??= (() => {
             this.updateGlobalCheckbox();
         }
 
-        #sortNodesByColumn(nodes, column) {
-            nodes.sort((row1, row2) => {
-                // list folders before files when sorting by name
-                if (column.name === "original") {
-                    const node1 = this.getNode(row1.data.rowId);
-                    const node2 = this.getNode(row2.data.rowId);
-                    if (node1.isFolder && !node2.isFolder)
-                        return -1;
-                    if (node2.isFolder && !node1.isFolder)
-                        return 1;
-                }
+        #sortNodesByColumn(root, column) {
+            const isColumnOriginal = (column.name === "original");
+            const isReverseSort = (this.reverseSort === "0");
 
-                const res = column.compareRows(row1, row2);
-                return (this.reverseSort === "0") ? res : -res;
-            });
+            const stack = [root];
+            while (stack.length > 0) {
+                const node = stack.pop();
 
-            nodes.each((node) => {
-                if (node.children.length > 0)
-                    this.#sortNodesByColumn(node.children, column);
-            });
+                node.children.sort((row1, row2) => {
+                    // list folders before files when sorting by name
+                    if (isColumnOriginal) {
+                        const node1 = this.getNode(row1.data.rowId);
+                        const node2 = this.getNode(row2.data.rowId);
+                        if (node1.isFolder && !node2.isFolder)
+                            return -1;
+                        if (!node1.isFolder && node2.isFolder)
+                            return 1;
+                    }
+
+                    const result = column.compareRows(row1, row2);
+                    return isReverseSort ? result : -result;
+                });
+
+                stack.push(...node.children);
+            }
         }
 
         #filterNodes(root, filterTerms) {
@@ -2532,7 +2538,8 @@ window.qBittorrent.DynamicTable ??= (() => {
         }
 
         getFilteredAndSortedRows() {
-            if (this.getRoot() === null)
+            const root = this.getRoot();
+            if (root === null)
                 return [];
 
             const generateRowsSignature = () => {
@@ -2540,16 +2547,6 @@ window.qBittorrent.DynamicTable ??= (() => {
                 for (const { full_data } of this.getRowValues())
                     rowsData.push(full_data);
                 return JSON.stringify(rowsData);
-            };
-
-            const getFilteredRows = () => {
-                if (this.filterTerms.length === 0) {
-                    const nodeArray = this.fileTree.toArray();
-                    const filteredRows = nodeArray.map(node => this.getRow(node));
-                    return filteredRows;
-                }
-
-                return this.#filterNodes(this.getRoot().children[0], this.filterTerms);
             };
 
             const hasRowsChanged = function(rowsString, prevRowsStringString) {
@@ -2570,16 +2567,23 @@ window.qBittorrent.DynamicTable ??= (() => {
                 return this.prevFilteredRows;
 
             // sort, then filter
-            const column = this.columns[this.sortedColumn];
-            this.#sortNodesByColumn(this.getRoot().children, column);
-            const filteredRows = getFilteredRows();
+            this.#sortNodesByColumn(root, this.columns[this.sortedColumn]);
+            const rows = (() => {
+                if (this.filterTerms.length === 0) {
+                    const nodeArray = this.fileTree.toArray();
+                    const filteredRows = nodeArray.map(node => this.getRow(node));
+                    return filteredRows;
+                }
+
+                return this.#filterNodes(root.children[0], this.filterTerms);
+            })();
 
             this.prevFilterTerms = this.filterTerms;
             this.prevRowsString = rowsString;
-            this.prevFilteredRows = filteredRows;
+            this.prevFilteredRows = rows;
             this.prevSortedColumn = this.sortedColumn;
             this.prevReverseSort = this.reverseSort;
-            return filteredRows;
+            return rows;
         }
 
         setIgnored(rowId, ignore) {
@@ -2917,26 +2921,31 @@ window.qBittorrent.DynamicTable ??= (() => {
             this.columns["availability"].updateTd = displayPercentage;
         }
 
-        #sortNodesByColumn(nodes, column) {
-            nodes.sort((row1, row2) => {
-                // list folders before files when sorting by name
-                if (column.name === "name") {
-                    const node1 = this.getNode(row1.data.rowId);
-                    const node2 = this.getNode(row2.data.rowId);
-                    if (node1.isFolder && !node2.isFolder)
-                        return -1;
-                    if (node2.isFolder && !node1.isFolder)
-                        return 1;
-                }
+        #sortNodesByColumn(root, column) {
+            const isColumnName = (column.name === "name");
+            const isReverseSort = (this.reverseSort === "0");
 
-                const res = column.compareRows(row1, row2);
-                return (this.reverseSort === "0") ? res : -res;
-            });
+            const stack = [root];
+            while (stack.length > 0) {
+                const node = stack.pop();
 
-            nodes.each((node) => {
-                if (node.children.length > 0)
-                    this.#sortNodesByColumn(node.children, column);
-            });
+                node.children.sort((row1, row2) => {
+                    // list folders before files when sorting by name
+                    if (isColumnName) {
+                        const node1 = this.getNode(row1.data.rowId);
+                        const node2 = this.getNode(row2.data.rowId);
+                        if (node1.isFolder && !node2.isFolder)
+                            return -1;
+                        if (!node1.isFolder && node2.isFolder)
+                            return 1;
+                    }
+
+                    const result = column.compareRows(row1, row2);
+                    return isReverseSort ? result : -result;
+                });
+
+                stack.push(...node.children);
+            }
         }
 
         #filterNodes(root, filterTerms) {
@@ -2995,7 +3004,8 @@ window.qBittorrent.DynamicTable ??= (() => {
         }
 
         getFilteredAndSortedRows() {
-            if (this.getRoot() === null)
+            const root = this.getRoot();
+            if (root === null)
                 return [];
 
             const generateRowsSignature = () => {
@@ -3004,8 +3014,6 @@ window.qBittorrent.DynamicTable ??= (() => {
                     rowsData.push({ ...full_data, collapsed: this.isCollapsed(full_data.rowId) });
                 return JSON.stringify(rowsData);
             };
-
-            const getFilteredRows = () => this.#filterNodes(this.getRoot().children[0], this.filterTerms);
 
             const hasRowsChanged = function(rowsString, prevRowsStringString) {
                 const rowsChanged = (rowsString !== prevRowsStringString);
@@ -3025,16 +3033,15 @@ window.qBittorrent.DynamicTable ??= (() => {
                 return this.prevFilteredRows;
 
             // sort, then filter
-            const column = this.columns[this.sortedColumn];
-            this.#sortNodesByColumn(this.getRoot().children, column);
-            const filteredRows = getFilteredRows();
+            this.#sortNodesByColumn(root, this.columns[this.sortedColumn]);
+            const rows = this.#filterNodes(root.children[0], this.filterTerms);
 
             this.prevFilterTerms = this.filterTerms;
             this.prevRowsString = rowsString;
-            this.prevFilteredRows = filteredRows;
+            this.prevFilteredRows = rows;
             this.prevSortedColumn = this.sortedColumn;
             this.prevReverseSort = this.reverseSort;
-            return filteredRows;
+            return rows;
         }
 
         setIgnored(rowId, ignore) {
@@ -3603,10 +3610,11 @@ window.qBittorrent.DynamicTable ??= (() => {
                 filteredRows = [...this.getRowValues()];
             }
 
+            const column = this.columns[this.sortedColumn];
+            const isReverseSort = (this.reverseSort === "0");
             filteredRows.sort((row1, row2) => {
-                const column = this.columns[this.sortedColumn];
-                const res = column.compareRows(row1, row2);
-                return (this.reverseSort === "0") ? res : -res;
+                const result = column.compareRows(row1, row2);
+                return isReverseSort ? result : -result;
             });
 
             this.filteredLength = filteredRows.length;
@@ -3661,10 +3669,11 @@ window.qBittorrent.DynamicTable ??= (() => {
                 filteredRows = [...this.getRowValues()];
             }
 
+            const column = this.columns[this.sortedColumn];
+            const isReverseSort = (this.reverseSort === "0");
             filteredRows.sort((row1, row2) => {
-                const column = this.columns[this.sortedColumn];
-                const res = column.compareRows(row1, row2);
-                return (this.reverseSort === "0") ? res : -res;
+                const result = column.compareRows(row1, row2);
+                return isReverseSort ? result : -result;
             });
 
             return filteredRows;
