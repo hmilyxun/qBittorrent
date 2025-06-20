@@ -147,7 +147,7 @@ BitTorrent::LoadResumeDataResult BitTorrent::BencodeResumeDataStorage::load(cons
     const Path torrentFilePath = path() / Path(idString + u".torrent");
     const qint64 torrentSizeLimit = Preferences::instance()->getTorrentFileSizeLimit();
 
-    const auto resumeDataReadResult = Utils::IO::readFile(fastresumePath, torrentSizeLimit);
+    const auto resumeDataReadResult = Utils::IO::readFile(fastresumePath, -1);
     if (!resumeDataReadResult)
         return nonstd::make_unexpected(resumeDataReadResult.error().message);
 
@@ -189,8 +189,13 @@ void BitTorrent::BencodeResumeDataStorage::loadQueue(const Path &queueFilename)
         return;
     }
 
+    QHash<TorrentID, qsizetype> registeredTorrentsIndexes;
+    registeredTorrentsIndexes.reserve(m_registeredTorrents.length());
+    for (qsizetype i = 0; i < m_registeredTorrents.length(); ++i)
+        registeredTorrentsIndexes.insert(m_registeredTorrents.at(i), i);
+
     const QRegularExpression hashPattern {u"^([A-Fa-f0-9]{40})$"_s};
-    int start = 0;
+    qsizetype queuePos = 0;
     while (true)
     {
         const auto line = QString::fromLatin1(queueFile.readLine(lineMaxLength).trimmed());
@@ -201,11 +206,15 @@ void BitTorrent::BencodeResumeDataStorage::loadQueue(const Path &queueFilename)
         if (rxMatch.hasMatch())
         {
             const auto torrentID = BitTorrent::TorrentID::fromString(rxMatch.captured(1));
-            const int pos = m_registeredTorrents.indexOf(torrentID, start);
+            const qsizetype pos = registeredTorrentsIndexes.value(torrentID, -1);
             if (pos != -1)
             {
-                std::swap(m_registeredTorrents[start], m_registeredTorrents[pos]);
-                ++start;
+                if (pos != queuePos)
+                {
+                    m_registeredTorrents.swapItemsAt(pos, queuePos);
+                    registeredTorrentsIndexes.insert(m_registeredTorrents.at(pos), pos);
+                }
+                ++queuePos;
             }
         }
     }
@@ -342,9 +351,9 @@ BitTorrent::LoadResumeDataResult BitTorrent::BencodeResumeDataStorage::loadTorre
     return torrentParams;
 }
 
-void BitTorrent::BencodeResumeDataStorage::store(const TorrentID &id, const LoadTorrentParams &resumeData) const
+void BitTorrent::BencodeResumeDataStorage::store(const TorrentID &id, LoadTorrentParams resumeData) const
 {
-    QMetaObject::invokeMethod(m_asyncWorker, [this, id, resumeData]()
+    QMetaObject::invokeMethod(m_asyncWorker, [this, id, resumeData = std::move(resumeData)]
     {
         m_asyncWorker->store(id, resumeData);
     });
