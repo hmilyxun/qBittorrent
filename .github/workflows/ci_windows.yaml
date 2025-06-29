@@ -106,7 +106,7 @@ jobs:
       - name: Install Qt
         uses: jurplel/install-qt-action@v4
         with:
-          version: "6.9.0"
+          version: "6.9.1"
           arch: win64_msvc2022_64
           archives: qtbase qtsvg qttools
           cache: true
@@ -121,7 +121,7 @@ jobs:
             ${{ env.libtorrent_path }}
           cd ${{ env.libtorrent_path }}
           $env:CXXFLAGS+=" /guard:cf"
-          $env:LDFLAGS+=" /guard:cf"
+          $env:LDFLAGS+=" /GUARD:CF"
           cmake `
             -B build `
             -G "Ninja" `

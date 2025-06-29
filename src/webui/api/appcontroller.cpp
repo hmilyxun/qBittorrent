@@ -77,6 +77,12 @@ const QString KEY_COOKIE_DOMAIN = u"domain"_s;
 const QString KEY_COOKIE_PATH = u"path"_s;
 const QString KEY_COOKIE_VALUE = u"value"_s;
 const QString KEY_COOKIE_EXPIRATION_DATE = u"expirationDate"_s;
+const QString KEY_FILE_METADATA_NAME = u"name"_s;
+const QString KEY_FILE_METADATA_TYPE = u"type"_s;
+const QString KEY_FILE_METADATA_SIZE = u"size"_s;
+const QString KEY_FILE_METADATA_CREATION_DATE = u"creation_date"_s;
+const QString KEY_FILE_METADATA_LAST_ACCESS_DATE = u"last_access_date"_s;
+const QString KEY_FILE_METADATA_LAST_MODIFICATION_DATE = u"last_modification_date"_s;
 
 void AppController::webapiVersionAction()
 {
@@ -123,6 +129,7 @@ void AppController::shutdownAction()
     {
         QCoreApplication::exit();
     });
+    setResult(QString());
 }
 
 void AppController::preferencesAction()
@@ -675,12 +682,12 @@ void AppController::setPreferencesAction()
     if (hasKey(u"autorun_on_torrent_added_enabled"_s))
         pref->setAutoRunOnTorrentAddedEnabled(it.value().toBool());
     if (hasKey(u"autorun_on_torrent_added_program"_s))
-        pref->setAutoRunOnTorrentAddedProgram(it.value().toString());
+        pref->setAutoRunOnTorrentAddedProgram(it.value().toString().trimmed());
     // Run an external program on torrent finished
     if (hasKey(u"autorun_enabled"_s))
         pref->setAutoRunOnTorrentFinishedEnabled(it.value().toBool());
     if (hasKey(u"autorun_program"_s))
-        pref->setAutoRunOnTorrentFinishedProgram(it.value().toString());
+        pref->setAutoRunOnTorrentFinishedProgram(it.value().toString().trimmed());
 
     // Connection
     // Listening Port
@@ -1167,6 +1174,8 @@ void AppController::setPreferencesAction()
 
     // Save preferences
     pref->apply();
+
+    setResult(QString());
 }
 
 void AppController::defaultSavePathAction()
@@ -1177,8 +1186,8 @@ void AppController::defaultSavePathAction()
 void AppController::sendTestEmailAction()
 {
     app()->sendTestEmail();
+    setResult(QString());
 }
-
 
 void AppController::getDirectoryContentAction()
 {
@@ -1207,10 +1216,40 @@ void AppController::getDirectoryContentAction()
         throw APIError(APIErrorType::BadParams, tr("Invalid mode, allowed values: %1").arg(u"all, dirs, files"_s));
     };
 
+    const bool withMetadata {Utils::String::parseBool(params()[u"withMetadata"_s]).value_or(false)};
+
     QJsonArray ret;
     QDirIterator it {dirPath, (QDir::NoDotAndDotDot | parseDirectoryContentMode(visibility))};
     while (it.hasNext())
-        ret.append(it.next());
+    {
+        if (withMetadata)
+        {
+            const QFileInfo fileInfo = it.nextFileInfo();
+            QJsonObject fileObject
+            {
+                {KEY_FILE_METADATA_NAME, fileInfo.fileName()},
+                {KEY_FILE_METADATA_CREATION_DATE, Utils::DateTime::toSecsSinceEpoch(fileInfo.birthTime())},
+                {KEY_FILE_METADATA_LAST_ACCESS_DATE, Utils::DateTime::toSecsSinceEpoch(fileInfo.lastRead())},
+                {KEY_FILE_METADATA_LAST_MODIFICATION_DATE, Utils::DateTime::toSecsSinceEpoch(fileInfo.lastModified())},
+            };
+
+            if (fileInfo.isDir())
+            {
+                fileObject.insert(KEY_FILE_METADATA_TYPE, u"dir"_s);
+            }
+            else if (fileInfo.isFile())
+            {
+                fileObject.insert(KEY_FILE_METADATA_TYPE, u"file"_s);
+                fileObject.insert(KEY_FILE_METADATA_SIZE, fileInfo.size());
+            }
+
+            ret.append(fileObject);
+        }
+        else
+        {
+            ret.append(it.next());
+        }
+    }
     setResult(ret);
 }
 
@@ -1269,6 +1308,8 @@ void AppController::setCookiesAction()
     }
 
     Net::DownloadManager::instance()->setAllCookies(cookies);
+
+    setResult(QString());
 }
 
 void AppController::networkInterfaceListAction()

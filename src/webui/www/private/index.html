@@ -42,6 +42,7 @@
     <script defer src="scripts/client.js?locale=${LANG}&v=${CACHEID}"></script>
     <script defer src="scripts/contextmenu.js?locale=${LANG}&v=${CACHEID}"></script>
     <script defer src="scripts/pathAutofill.js?v=${CACHEID}"></script>
+    <script defer src="scripts/statistics.js?v=${CACHEID}"></script>
 </head>
 
 <body>
@@ -275,9 +276,9 @@
         <li><a href="#ToggleSelection"><img src="images/edit-rename.svg" alt="QBT_TR(Toggle Selection)QBT_TR[CONTEXT=PropertiesWidget]"> QBT_TR(Toggle Selection)QBT_TR[CONTEXT=PropertiesWidget]</a></li>
     </ul>
     <div id="desktopFooterWrapper">
-        <div id="desktopFooter">
+        <div id="desktopFooter" style="overflow-x: auto;">
             <span id="error_div"></span>
-            <table style="position: absolute; right: 5px;">
+            <table style="margin-right: 5px; width: max-content;">
                 <tbody>
                     <tr>
                         <td id="freeSpaceOnDisk"></td>

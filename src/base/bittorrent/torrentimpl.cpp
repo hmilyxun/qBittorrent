@@ -299,7 +299,7 @@ namespace
 
 // TorrentImpl
 
-TorrentImpl::TorrentImpl(SessionImpl *session, const lt::torrent_handle &nativeHandle, const LoadTorrentParams &params)
+TorrentImpl::TorrentImpl(SessionImpl *session, const lt::torrent_handle &nativeHandle, LoadTorrentParams params)
     : Torrent(session)
     , m_session(session)
     , m_nativeHandle(nativeHandle)
@@ -324,7 +324,7 @@ TorrentImpl::TorrentImpl(SessionImpl *session, const lt::torrent_handle &nativeH
     , m_useAutoTMM(params.useAutoTMM)
     , m_isStopped(params.stopped)
     , m_sslParams(params.sslParameters)
-    , m_ltAddTorrentParams(params.ltAddTorrentParams)
+    , m_ltAddTorrentParams(std::move(params.ltAddTorrentParams))
     , m_downloadLimit(cleanLimitValue(m_ltAddTorrentParams.download_limit))
     , m_uploadLimit(cleanLimitValue(m_ltAddTorrentParams.upload_limit))
 {
@@ -1835,7 +1835,7 @@ void TorrentImpl::endReceivedMetadataHandling(const Path &savePath, const PathLi
         applyFirstLastPiecePriority(true);
 
     m_maintenanceJob = MaintenanceJob::None;
-    prepareResumeData(p);
+    prepareResumeData(std::move(p));
 
     m_session->handleTorrentMetadataReceived(this);
 }
@@ -2202,7 +2202,7 @@ void TorrentImpl::prepareResumeData(lt::add_torrent_params params)
     // We shouldn't save upload_mode flag to allow torrent operate normally on next run
     m_ltAddTorrentParams.flags &= ~lt::torrent_flags::upload_mode;
 
-    const LoadTorrentParams resumeData
+    LoadTorrentParams resumeData
     {
         .ltAddTorrentParams = m_ltAddTorrentParams,
         .name = m_name,
@@ -2225,7 +2225,7 @@ void TorrentImpl::prepareResumeData(lt::add_torrent_params params)
         .sslParameters = m_sslParams
     };
 
-    m_session->handleTorrentResumeDataReady(this, resumeData);
+    m_session->handleTorrentResumeDataReady(this, std::move(resumeData));
 }
 
 void TorrentImpl::handleFastResumeRejected()

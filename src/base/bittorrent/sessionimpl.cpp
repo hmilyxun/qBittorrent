@@ -1463,15 +1463,13 @@ void SessionImpl::handleLoadedResumeData(ResumeSessionContext *context)
 
 void SessionImpl::processNextResumeData(ResumeSessionContext *context)
 {
-    const LoadedResumeData loadedResumeDataItem = context->loadedResumeData.takeFirst();
+    auto [torrentID, loadResumeDataResult] = context->loadedResumeData.takeFirst();
 
-    TorrentID torrentID = loadedResumeDataItem.torrentID;
 #ifdef QBT_USES_LIBTORRENT2
     if (context->skippedIDs.contains(torrentID))
         return;
 #endif
 
-    const nonstd::expected<LoadTorrentParams, QString> &loadResumeDataResult = loadedResumeDataItem.result;
     if (!loadResumeDataResult)
     {
         LogMsg(tr("Failed to resume torrent. Torrent: \"%1\". Reason: \"%2\"")
@@ -1479,7 +1477,7 @@ void SessionImpl::processNextResumeData(ResumeSessionContext *context)
         return;
     }
 
-    LoadTorrentParams resumeData = *loadResumeDataResult;
+    LoadTorrentParams resumeData = std::move(*loadResumeDataResult);
     bool needStore = false;
 
     const InfoHash infoHash = getInfoHash(resumeData.ltAddTorrentParams);
@@ -1514,11 +1512,10 @@ void SessionImpl::processNextResumeData(ResumeSessionContext *context)
         {
             context->skippedIDs.insert(torrentID);
 
-            const nonstd::expected<LoadTorrentParams, QString> loadPreferredResumeDataResult = context->startupStorage->load(torrentID);
-            if (loadPreferredResumeDataResult)
+            if (nonstd::expected<LoadTorrentParams, QString> loadPreferredResumeDataResult = context->startupStorage->load(torrentID))
             {
                 std::shared_ptr<lt::torrent_info> ti = resumeData.ltAddTorrentParams.ti;
-                resumeData = *loadPreferredResumeDataResult;
+                resumeData = std::move(*loadPreferredResumeDataResult);
                 if (!resumeData.ltAddTorrentParams.ti)
                     resumeData.ltAddTorrentParams.ti = std::move(ti);
             }
@@ -1555,7 +1552,7 @@ void SessionImpl::processNextResumeData(ResumeSessionContext *context)
     // == END UPGRADE CODE ==
 
     if (needStore)
-         m_resumeDataStorage->store(torrentID, resumeData);
+        m_resumeDataStorage->store(torrentID, resumeData);
 
     const QString category = resumeData.category;
     bool isCategoryRecovered = context->recoveredCategories.contains(category);
@@ -1621,7 +1618,7 @@ void SessionImpl::processNextResumeData(ResumeSessionContext *context)
 
     qDebug() << "Starting up torrent" << torrentID.toString() << "...";
     m_nativeSession->async_add_torrent(resumeData.ltAddTorrentParams);
-    m_addTorrentAlertHandlers.enqueue([this, resumeData = std::move(resumeData)](const lt::add_torrent_alert *alert)
+    m_addTorrentAlertHandlers.append([this, resumeData = std::move(resumeData)](const lt::add_torrent_alert *alert) mutable
     {
         if (alert->error)
         {
@@ -1630,7 +1627,7 @@ void SessionImpl::processNextResumeData(ResumeSessionContext *context)
         }
         else
         {
-            Torrent *torrent = createTorrent(alert->handle, resumeData);
+            Torrent *torrent = createTorrent(alert->handle, std::move(resumeData));
             m_loadedTorrents.append(torrent);
 
             LogMsg(tr("Restored torrent. Torrent: \"%1\"").arg(torrent->name()));
@@ -3016,7 +3013,7 @@ bool SessionImpl::addTorrent_impl(const TorrentDescriptor &source, const AddTorr
         }
 
         m_nativeSession->async_add_torrent(p);
-        m_addTorrentAlertHandlers.enqueue([this, loadTorrentParams = std::move(loadTorrentParams)](const lt::add_torrent_alert *alert)
+        m_addTorrentAlertHandlers.append([this, loadTorrentParams = std::move(loadTorrentParams)](const lt::add_torrent_alert *alert) mutable
         {
             if (alert->error)
             {
@@ -3033,7 +3030,7 @@ bool SessionImpl::addTorrent_impl(const TorrentDescriptor &source, const AddTorr
                 if (loadTorrentParams.addToQueueTop)
                     alert->handle.queue_position_top();
 
-                TorrentImpl *torrent = createTorrent(alert->handle, loadTorrentParams);
+                TorrentImpl *torrent = createTorrent(alert->handle, std::move(loadTorrentParams));
                 m_loadedTorrents.append(torrent);
 
                 torrent->requestResumeData(lt::torrent_handle::save_info_dict);
@@ -3203,7 +3200,7 @@ bool SessionImpl::downloadMetadata(const TorrentDescriptor &torrentDescr)
     // Adding torrent to libtorrent session
     m_nativeSession->async_add_torrent(p);
     m_downloadedMetadata.insert(id, {});
-    m_addTorrentAlertHandlers.enqueue([this](const lt::add_torrent_alert *alert)
+    m_addTorrentAlertHandlers.append([this](const lt::add_torrent_alert *alert)
     {
         if (alert->error)
         {
@@ -3304,7 +3301,7 @@ void SessionImpl::saveResumeData()
         fetchPendingAlerts(waitTime);
 
         bool hasWantedAlert = false;
-        for (const lt::alert *alert : m_alerts)
+        for (lt::alert *alert : m_alerts)
         {
             if (const int alertType = alert->type();
                 (alertType == lt::save_resume_data_alert::alert_type) || (alertType == lt::save_resume_data_failed_alert::alert_type)
@@ -5403,9 +5400,9 @@ void SessionImpl::handleTorrentFinished(TorrentImpl *const torrent)
     m_pendingFinishedTorrents.append(torrent);
 }
 
-void SessionImpl::handleTorrentResumeDataReady(TorrentImpl *const torrent, const LoadTorrentParams &data)
+void SessionImpl::handleTorrentResumeDataReady(TorrentImpl *const torrent, LoadTorrentParams data)
 {
-    m_resumeDataStorage->store(torrent->id(), data);
+    m_resumeDataStorage->store(torrent->id(), std::move(data));
     const auto iter = m_changedTorrentIDs.constFind(torrent->id());
     if (iter != m_changedTorrentIDs.cend())
     {
@@ -5501,7 +5498,7 @@ lt::torrent_handle SessionImpl::reloadTorrent(const lt::torrent_handle &currentH
 #endif
 
     // libtorrent will post an add_torrent_alert anyway, so we have to add an empty handler to ignore it.
-    m_addTorrentAlertHandlers.enqueue({});
+    m_addTorrentAlertHandlers.emplaceBack();
     return m_nativeSession->add_torrent(std::move(params));
 }
 
@@ -5803,7 +5800,7 @@ void SessionImpl::readAlerts()
     if (!isRestored())
         m_loadedTorrents.reserve(MAX_PROCESSING_RESUMEDATA_COUNT);
 
-    for (const lt::alert *a : m_alerts)
+    for (lt::alert *a : m_alerts)
         handleAlert(a);
 
     if (m_receivedAddTorrentAlertsCount > 0)
@@ -5833,11 +5830,11 @@ void SessionImpl::handleAddTorrentAlert(const lt::add_torrent_alert *alert)
     if (m_addTorrentAlertHandlers.isEmpty()) [[unlikely]]
         return;
 
-    if (const AddTorrentAlertHandler handleAlert = m_addTorrentAlertHandlers.dequeue())
+    if (const AddTorrentAlertHandler handleAlert = m_addTorrentAlertHandlers.takeFirst())
         handleAlert(alert);
 }
 
-void SessionImpl::handleAlert(const lt::alert *alert)
+void SessionImpl::handleAlert(lt::alert *alert)
 {
     try
     {
@@ -5864,7 +5861,7 @@ void SessionImpl::handleAlert(const lt::alert *alert)
             handleTorrentFinishedAlert(static_cast<const lt::torrent_finished_alert *>(alert));
             break;
         case lt::save_resume_data_alert::alert_type:
-            handleSaveResumeDataAlert(static_cast<const lt::save_resume_data_alert *>(alert));
+            handleSaveResumeDataAlert(static_cast<lt::save_resume_data_alert *>(alert));
             break;
         case lt::save_resume_data_failed_alert::alert_type:
             handleSaveResumeDataFailedAlert(static_cast<const lt::save_resume_data_failed_alert *>(alert));
@@ -5963,9 +5960,9 @@ void SessionImpl::handleAlert(const lt::alert *alert)
     }
 }
 
-TorrentImpl *SessionImpl::createTorrent(const lt::torrent_handle &nativeHandle, const LoadTorrentParams &params)
+TorrentImpl *SessionImpl::createTorrent(const lt::torrent_handle &nativeHandle, LoadTorrentParams params)
 {
-    auto *const torrent = new TorrentImpl(this, nativeHandle, params);
+    auto *const torrent = new TorrentImpl(this, nativeHandle, std::move(params));
     m_torrents.insert(torrent->id(), torrent);
     if (const InfoHash infoHash = torrent->infoHash(); infoHash.isHybrid())
         m_hybridTorrentsByAltID.insert(TorrentID::fromSHA1Hash(infoHash.v1()), torrent);
@@ -6483,7 +6480,7 @@ void SessionImpl::handleTorrentFinishedAlert([[maybe_unused]] const lt::torrent_
         torrent->handleTorrentFinished();
 }
 
-void SessionImpl::handleSaveResumeDataAlert(const lt::save_resume_data_alert *alert)
+void SessionImpl::handleSaveResumeDataAlert(lt::save_resume_data_alert *alert)
 {
     // The torrent can be deleted between the time the resume data was requested and
     // the time we received the appropriate alert. We have to decrease `m_numResumeData` anyway,
@@ -6491,7 +6488,7 @@ void SessionImpl::handleSaveResumeDataAlert(const lt::save_resume_data_alert *al
     --m_numResumeData;
 
     if (TorrentImpl *torrent = getTorrent(alert->handle)) [[likely]]
-        torrent->handleSaveResumeData(alert->params); // TODO: Try to move `alert->params`
+        torrent->handleSaveResumeData(std::move(alert->params));
 }
 
 void SessionImpl::handleSaveResumeDataFailedAlert(const lt::save_resume_data_failed_alert *alert)

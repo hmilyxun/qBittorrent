@@ -1,7 +1,6 @@
 /*
  * Bittorrent Client using Qt and libtorrent.
- * Copyright (C) 2023-2025  Vladimir Golovnev <glassez@yandex.ru>
- * Copyright (C) 2018  Mike Tzou (Chocobo1)
+ * Copyright (C) 2024 Thomas Piccirello <thomas@piccirello.com>
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License
@@ -29,17 +28,8 @@
 
 #pragma once
 
-#include <Qt>
-#include <QtContainerFwd>
-
-class QByteArray;
-class QByteArrayView;
-
-namespace Utils::ByteArray
+enum class APIStatus
 {
-    // Inspired by QStringView(in).split(sep, behavior)
-    QList<QByteArrayView> splitToViews(QByteArrayView in, QByteArrayView sep, Qt::SplitBehavior behavior = Qt::SkipEmptyParts);
-    QByteArray asQByteArray(QByteArrayView view);
-
-    QByteArray toBase32(const QByteArray &in);
-}
+    Ok,
+    Async
+};
